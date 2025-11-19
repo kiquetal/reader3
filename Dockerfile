@@ -16,6 +16,9 @@ RUN uv sync
 # Copy the rest of the application code
 COPY . .
 
+# Process the book during the build
+RUN uv run reader3.py dracula.epub
+
 # Expose the port the app runs on
 EXPOSE 8123
 
