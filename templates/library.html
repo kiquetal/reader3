@@ -18,7 +18,10 @@
 </head>
 <body>
     <div class="container">
-        <h1>Library</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>Library</h1>
+            <a href="/refresh" class="btn">Refresh Library</a>
+        </div>
 
         {% if not books %}
             <p>No processed books found. Run <code>reader3.py</code> on an epub first.</p>

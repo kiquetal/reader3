@@ -72,14 +72,40 @@ uvicorn.run(app, host="0.0.0.0", port=8123)
 ```
 After this change, the container image needed to be rebuilt and restarted.
 
-## Step 3: Baking the Book into the Image
+## Step 3: A More Flexible Approach with an Entrypoint Script
 
-The user requested to avoid having to pass arguments or run separate commands for processing EPUBs after starting the Docker Compose services. To achieve this, the book processing step was integrated directly into the Docker image build process.
+The previous method of baking the book into the image was simple, but inflexible. A superior approach is to use a volume to manage books and an entrypoint script to automatically process them on container startup.
+
+**The Entrypoint Script (`docker-entrypoint.sh`):**
+
+A shell script was created to act as the container's entrypoint. Its logic is as follows:
+1.  On startup, scan the `/app` directory for any `*.epub` files.
+2.  For each EPUB found, check if a corresponding `*_data` directory already exists.
+3.  If the data directory does *not* exist, process the book by running `uv run reader3.py <book.epub>`.
+4.  If the data directory *does* exist, skip processing.
+5.  After the loop, start the main web server.
+
+```bash
+#!/bin/sh
+set -e
+for epub_file in /app/*.epub; do
+  [ -e "$epub_file" ] || continue
+  data_dir="/app/$(basename "$epub_file" .epub)_data"
+  if [ ! -d "$data_dir" ]; then
+    echo "Processing book: $epub_file"
+    uv run reader3.py "$epub_file"
+  else
+    echo "Book already processed: $epub_file"
+  fi
+done
+echo "Starting web server..."
+exec "$@"
+```
 
 **Changes Made:**
-1.  **`.dockerignore` modification:** Removed `*.epub` from `.dockerignore` to ensure `dracula.epub` is copied into the build context.
-2.  **`Dockerfile` update:** Added a `RUN` instruction to execute the book processing script during the image build.
-3.  **`docker-compose.yml` update:** Removed the `volumes` section, as the book data is now part of the image itself, eliminating the need for host-to-container volume mapping for books.
+1.  **`Dockerfile` update:** The `RUN` command for processing a specific book was removed. The new `docker-entrypoint.sh` script is copied into the image and set as the `ENTRYPOINT`.
+2.  **`docker-compose.yml` update:** The `volumes` section was re-added to mount the host's project directory into the container's `/app` directory.
+3.  **`.dockerignore` update:** `*.epub` and `*_data` were re-added to prevent local book files from being copied into the image build, as they are now handled by the volume.
 
 **Final `Dockerfile`:**
 ```dockerfile
@@ -101,11 +127,14 @@ RUN uv sync
 # Copy the rest of the application code
 COPY . .
 
-# Process the book during the build
-RUN uv run reader3.py dracula.epub
+# Copy the entrypoint script
+COPY docker-entrypoint.sh .
 
 # Expose the port the app runs on
 EXPOSE 8123
+
+# Set the entrypoint
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 # The command to run the server
 CMD ["uv", "run", "server.py"]
@@ -118,16 +147,17 @@ services:
     build: .
     ports:
       - "8123:8123"
+    volumes:
+      - .:/app
 ```
-
-**Trade-offs:**
-*   The Docker image size will be larger as it includes the book data.
-*   To add a new book, you will need to modify the `Dockerfile` (or add a generic mechanism to it) and rebuild the Docker image.
 
 ## How to Use (Current State)
 
-With the finalized Docker setup, interacting with the `reader3` application is streamlined:
+This setup provides a simple and powerful workflow for managing your library.
 
-*   **Build and Run (old command equivalent):** `docker compose up -d --build`
+*   **Add Books:** Simply place your `.epub` files in the same directory as the `docker-compose.yml` file.
+*   **Build and Run:** `docker compose up -d --build`
+    *   On the first run, the entrypoint script will process all found EPUBs.
+    *   On subsequent runs, it will only process new EPUBs that you've added.
 *   **Access the application:** Open your web browser to `http://localhost:8123`
 *   **Stop the application:** `docker compose down`

@@ -15,7 +15,7 @@ app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
 # Where are the book folders located?
-BOOKS_DIR = "."
+BOOKS_DIR = "epub_books"
 
 @lru_cache(maxsize=10)
 def load_book_cached(folder_name: str) -> Optional[Book]:
@@ -35,6 +35,74 @@ def load_book_cached(folder_name: str) -> Optional[Book]:
         print(f"Error loading book {folder_name}: {e}")
         return None
 
+import uvicorn
+import os
+import pickle
+import subprocess
+from functools import lru_cache
+from typing import Optional
+
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from reader3 import Book, BookMetadata, ChapterContent, TOCEntry
+
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
+
+# Where are the book folders located?
+BOOKS_DIR = "epub_books"
+
+@lru_cache(maxsize=10)
+def load_book_cached(folder_name: str) -> Optional[Book]:
+    """
+    Loads the book from the pickle file.
+    Cached so we don't re-read the disk on every click.
+    """
+    file_path = os.path.join(BOOKS_DIR, folder_name, "book.pkl")
+    if not os.path.exists(file_path):
+        return None
+
+    try:
+        with open(file_path, "rb") as f:
+            book = pickle.load(f)
+        return book
+    except Exception as e:
+        print(f"Error loading book {folder_name}: {e}")
+        return None
+
+@app.get("/refresh", response_class=RedirectResponse)
+async def refresh_books():
+    """
+    Scans the epub_books directory and processes any new books.
+    """
+    print("--- Refreshing books ---")
+    processed_files = []
+    for epub_file in os.listdir(BOOKS_DIR):
+        if not epub_file.endswith(".epub"):
+            continue
+
+        epub_path = os.path.join(BOOKS_DIR, epub_file)
+        data_dir = os.path.splitext(epub_path)[0] + "_data"
+
+        if not os.path.exists(data_dir):
+            print(f"Processing new book: {epub_file}")
+            try:
+                subprocess.run(["uv", "run", "reader3.py", epub_path], check=True)
+                processed_files.append(epub_file)
+            except subprocess.CalledProcessError as e:
+                print(f"Error processing {epub_file}: {e}")
+        else:
+            print(f"Book already processed: {epub_file}")
+    
+    # Clear the cache to ensure the new books are loaded
+    load_book_cached.cache_clear()
+    
+    return RedirectResponse(url="/", status_code=303)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def library_view(request: Request):
     """Lists all available processed books."""
@@ -43,7 +111,7 @@ async def library_view(request: Request):
     # Scan directory for folders ending in '_data' that have a book.pkl
     if os.path.exists(BOOKS_DIR):
         for item in os.listdir(BOOKS_DIR):
-            if item.endswith("_data") and os.path.isdir(item):
+            if item.endswith("_data") and os.path.isdir(os.path.join(BOOKS_DIR, item)):
                 # Try to load it to get the title
                 book = load_book_cached(item)
                 if book:
