@@ -1,0 +1,9 @@
+.git
+.gitignore
+.python-version
+__pycache__
+*_data
+Dockerfile
+docker-compose.yml
+README.md
+reader3.png
