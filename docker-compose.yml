@@ -5,3 +5,4 @@ services:
       - "8123:8123"
     volumes:
       - .:/app
+      - ./epub_books:/app/epub_books
