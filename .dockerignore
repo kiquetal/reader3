@@ -2,6 +2,7 @@
 .gitignore
 .python-version
 __pycache__
+*.epub
 *_data
 Dockerfile
 docker-compose.yml
